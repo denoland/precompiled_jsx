@@ -39,7 +39,7 @@ export function jsx<T>(
         if (name === "ref" || name === "key" || typeof value === "function") {
           continue;
         } else if (name === "children") {
-          children = renderDynamic(value);
+          children = jsxchild(value);
         } else if (name === "dangerouslySetInnerHTML") {
           if (typeof value === "string") {
             children = value;
@@ -68,7 +68,7 @@ export function jsx<T>(
   // Render a component
   // deno-lint-ignore no-explicit-any
   const result = type(props ?? {} as any);
-  return isVNode(result) ? result : createVNode(renderDynamic(result));
+  return isVNode(result) ? result : createVNode(jsxchild(result));
 }
 
 export function jsxattr(name: string, value: unknown) {
@@ -79,30 +79,27 @@ export function jsxattr(name: string, value: unknown) {
   return `${name}="${escapeHtml(String(value))}"`;
 }
 
-export const jsxchild = escapeHtml;
-
 /**
  * Serialize any value to a string. To match common expectations
  * of JSX, this discards falsy values, booleans and functions.
  */
-function renderDynamic(dynamic: unknown): string {
+export function jsxchild(value: unknown) {
   if (
-    dynamic === null ||
-    dynamic === undefined || typeof dynamic === "boolean" ||
-    typeof dynamic === "function"
+    value === null ||
+    value === undefined || typeof value === "boolean" ||
+    typeof value === "function"
   ) {
     return "";
-  } else if (Array.isArray(dynamic)) {
+  } else if (isVNode(value)) {
+    return value.value;
+  } else if (Array.isArray(value)) {
     let out = "";
-    for (let i = 0; i < dynamic.length; i++) {
-      out += renderDynamic(dynamic[i]);
+    for (let i = 0; i < value.length; i++) {
+      out += jsxchild(value[i]);
     }
     return out;
-  } else if (isVNode(dynamic)) {
-    return dynamic.value;
   }
-
-  return String(dynamic);
+  return escapeHtml(String(value));
 }
 
 /**
@@ -117,7 +114,7 @@ export function jsxssr(tpl: string[], ...dynamics: unknown[]): VNode {
     out += tpl[i];
 
     if (i < dynamics.length) {
-      out += renderDynamic(dynamics[i]);
+      out += dynamics[i];
     }
   }
 
@@ -128,5 +125,5 @@ export function jsxssr(tpl: string[], ...dynamics: unknown[]): VNode {
  * Render JSX to an HTML string
  */
 export function renderToString(vnode: VNode) {
-  return renderDynamic(vnode);
+  return jsxchild(vnode);
 }
