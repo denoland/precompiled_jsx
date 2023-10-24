@@ -60,10 +60,16 @@ Deno.test("jsxssr - jsx children", () => {
 });
 
 Deno.test("jsx - dom", () => {
-  // FIXME
   assertEquals(
-    jsx("div", { className: "foo" }),
-    "<div></div>",
+    jsx("div", { class: "foo", onclick: () => null }),
+    `<div class="foo"></div>`,
+  );
+});
+
+Deno.test("jsx - dangerouslySetInnerHTML", () => {
+  assertEquals(
+    jsx("div", { dangerouslySetInnerHTML: "<span>foo</span>" }),
+    "<div><span>foo</span></div>",
   );
 });
 

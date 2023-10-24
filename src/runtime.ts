@@ -52,7 +52,7 @@ function escapeHtml(str: string) {
   return out;
 }
 
-export type ComponentFn<T> = (props: T) => string;
+export type ComponentFn<T> = (props: T) => unknown;
 
 const VOID_ELEMENTS = new Set([
   "area",
@@ -77,16 +77,43 @@ export function jsx<T>(
   _key?: string | number,
 ) {
   if (typeof type === "string") {
-    let out = `<${type}`;
+    let children = "";
+    let attrs = "";
 
-    // FIXME: Parse attributes
+    if (props !== null) {
+      const anyProps = props as unknown as Record<string, unknown>;
+      const propKeys = Object.keys(anyProps);
+
+      for (let i = 0; i < propKeys.length; i++) {
+        const name = propKeys[i];
+        const value = anyProps[name];
+
+        if (name === "ref" || name === "key" || typeof value === "function") {
+          continue;
+        } else if (name === "children") {
+          children;
+        } else if (name === "dangerouslySetInnerHTML") {
+          if (typeof value === "string") {
+            children = value;
+          } else if (value !== null && typeof value === "object") {
+            // deno-lint-ignore no-explicit-any
+            children = (value as any).__html ?? "";
+          }
+        } else {
+          attrs += jsxattr(name, value);
+        }
+      }
+    }
+
+    let out = `<${type}`;
+    if (attrs !== "") out += " " + attrs;
 
     if (VOID_ELEMENTS.has(type)) {
       out += ">";
       return out;
     }
 
-    out += `></${type}>`;
+    out += `>${children}</${type}>`;
     return out;
   }
 
