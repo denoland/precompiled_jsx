@@ -1,85 +1,31 @@
 // Copyright 2023-present the Deno authors. All rights reserved. MIT license.
-
-const ENCODED_ENTITIES = /["&<>']/;
-
-const enum Char {
-  DOUBLE_QUOTE = 34,
-  AMPERSAND = 38,
-  SINGLE_QUOTE = 39,
-  LESS_THAN = 60,
-  GREATER_THAN = 62,
-}
+import {
+  ComponentFn,
+  createVNode,
+  escapeHtml,
+  isVNode,
+  VNode,
+  VOID_ELEMENTS,
+} from "./utils.ts";
 
 /**
- * Escape HTML
+ * Dynamic JSX factory function for components or JSX nodes that
+ * cannot be serialized. A node is not serializable when it is
+ * a component, has spread props or uses `dangerouslySetInnerHTML`.
  */
-function escapeHtml(str: string) {
-  if (str.length === 0 || !ENCODED_ENTITIES.test(str)) return str;
-
-  let last = 0,
-    i = 0,
-    out = "",
-    ch = "";
-
-  // Seek forward in str until the next entity char:
-  for (; i < str.length; i++) {
-    switch (str.charCodeAt(i)) {
-      case Char.DOUBLE_QUOTE:
-        ch = "&quot;";
-        break;
-      case Char.AMPERSAND:
-        ch = "&amp;";
-        break;
-      case Char.SINGLE_QUOTE:
-        ch = "&#39;";
-        break;
-      case Char.LESS_THAN:
-        ch = "&lt;";
-        break;
-      case Char.GREATER_THAN:
-        ch = "&gt;";
-        break;
-      default:
-        continue;
-    }
-    // Append skipped/buffered characters and the encoded entity:
-    if (i !== last) out += str.slice(last, i);
-    out += ch;
-    // Start the next seek/buffer after the entity's offset:
-    last = i + 1;
-  }
-  if (i !== last) out += str.slice(last, i);
-  return out;
-}
-
-export type ComponentFn<T> = (props: T) => unknown;
-
-const VOID_ELEMENTS = new Set([
-  "area",
-  "base",
-  "br",
-  "col",
-  "embed",
-  "hr",
-  "img",
-  "input",
-  "link",
-  "meta",
-  "param",
-  "source",
-  "track",
-  "wbr",
-]);
-
 export function jsx<T>(
   type: ComponentFn<T> | string,
   props: T | null,
   _key?: string | number,
-) {
+): VNode {
+  // Case: jsx("div", { foo: "bar", ...baz })
+  // Case: jsx("div", null)
   if (typeof type === "string") {
     let children = "";
     let attrs = "";
 
+    // Serialize attributes to string
+    // Case: jsx("div", null)
     if (props !== null) {
       const anyProps = props as unknown as Record<string, unknown>;
       const propKeys = Object.keys(anyProps);
@@ -88,10 +34,12 @@ export function jsx<T>(
         const name = propKeys[i];
         const value = anyProps[name];
 
+        // Skip serializing special properties and functions which are
+        // mostly used for event listeners
         if (name === "ref" || name === "key" || typeof value === "function") {
           continue;
         } else if (name === "children") {
-          children;
+          children = renderDynamic(value);
         } else if (name === "dangerouslySetInnerHTML") {
           if (typeof value === "string") {
             children = value;
@@ -110,50 +58,60 @@ export function jsx<T>(
 
     if (VOID_ELEMENTS.has(type)) {
       out += ">";
-      return out;
+      return createVNode(out);
     }
 
     out += `>${children}</${type}>`;
-    return out;
+    return createVNode(out);
   }
 
+  // Render a component
   // deno-lint-ignore no-explicit-any
-  return String(type(props ?? {} as any));
+  const result = type(props ?? {} as any);
+  return isVNode(result) ? result : createVNode(renderDynamic(result));
 }
 
-// deno-lint-ignore no-explicit-any
-export function jsxattr(name: string, value: any) {
+export function jsxattr(name: string, value: unknown) {
   if (name === "key" || name === "ref" || typeof value === "function") {
     return "";
-  } else if (ENCODED_ENTITIES.test(name)) {
-    // Don't even attempt to encode it
-    throw new Error(`Invalid attribute name: ${name}`);
   }
 
   return `${name}="${escapeHtml(String(value))}"`;
 }
 
-function renderDynamic(value: unknown): string {
+export const jsxchild = escapeHtml;
+
+/**
+ * Serialize any value to a string. To match common expectations
+ * of JSX, this discards falsy values, booleans and functions.
+ */
+function renderDynamic(dynamic: unknown): string {
   if (
-    value === true || value === false || value === null ||
-    value === undefined || typeof value === "function"
+    dynamic === null ||
+    dynamic === undefined || typeof dynamic === "boolean" ||
+    typeof dynamic === "function"
   ) {
     return "";
-  }
-
-  if (Array.isArray(value)) {
+  } else if (Array.isArray(dynamic)) {
     let out = "";
-    for (let i = 0; i < value.length; i++) {
-      out += renderDynamic(value[i]);
+    for (let i = 0; i < dynamic.length; i++) {
+      out += renderDynamic(dynamic[i]);
     }
     return out;
+  } else if (isVNode(dynamic)) {
+    return dynamic.value;
   }
 
-  return String(value);
+  return String(dynamic);
 }
 
-// deno-lint-ignore no-explicit-any
-export function jsxssr(tpl: string[], ...dynamics: any[]) {
+/**
+ * Construct a template composed of static strings and dynamic values
+ * into something we can render later. The dynamic parts are expected
+ * to be already escaped strings or VNode objects. This function is
+ * expected to be used for transpilation.
+ */
+export function jsxssr(tpl: string[], ...dynamics: unknown[]): VNode {
   let out = "";
   for (let i = 0; i < tpl.length; i++) {
     out += tpl[i];
@@ -163,5 +121,12 @@ export function jsxssr(tpl: string[], ...dynamics: any[]) {
     }
   }
 
-  return out;
+  return createVNode(out);
+}
+
+/**
+ * Render JSX to an HTML string
+ */
+export function renderToString(vnode: VNode) {
+  return renderDynamic(vnode);
 }
